@@ -1,3 +1,19 @@
+import sys # For argparse
+import argparse
+import os
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-p", "--picture", help="source of picture to run test on", type=str)
+parser.add_argument("-d", "--dataset", help="source of dataset to use as base for text detection")
+parser.add_argument("-q", "--quantization", help="quantization unit (can be dr, int8, or float16)")
+args = parser.parse_args()
+abp = os.path.abspath(__file__)
+path_to_main_file = abp[len(os.getcwd()) + 1 : len(abp) - len(os.path.basename(__file__))]
+if args.picture is None:
+    image3 = path_to_main_file + "yellow_submarine.png"
+else:
+    image3 = args.picture
+
 import tensorflow as tf
 
 from imutils.object_detection import non_max_suppression
@@ -5,25 +21,16 @@ from imutils import paths
 import numpy as np
 import time
 import cv2
-import os
-
-image3 = cv2.imread("lena.png")
-h, w = image3.shape[:2]
-print(h, w)
-
-start_point = (128, 128)
-end_point = (384, 384)
-color = (0, 0, 255)
-thickness = 2
-
-image_rect = cv2.rectangle(image3, start_point, end_point, color, thickness)
 
 # cv2.imshow('lena.png', image_rect)
 #
 # cv2.waitKey(0)
 
-IMAGE_LIST = paths.list_images("COCO_Text\\coco_text_100")
 IMG_SIZE = 320
+if args.dataset is None:
+    IMAGE_LIST = paths.list_images(path_to_main_file + "COCO_Text\\coco_text_100")
+else:
+    IMAGE_LIST = paths.list_images(args.dataset)
 
 
 def representative_dataset_gen():
@@ -37,26 +44,40 @@ def representative_dataset_gen():
         yield [image]
 
 
-quantization = 'int8'  # @param ['dr', 'int8', 'float16']
-converter = tf.compat.v1.lite.TFLiteConverter.from_frozen_graph(
-    graph_def_file='EAST-text-detection-OpenCV/frozen_east_text_detection.pb', # This has to have the folder specified based on the OS
-    input_arrays=['input_images'],
-    output_arrays=['feature_fusion/Conv_7/Sigmoid', 'feature_fusion/concat_3'],
-    input_shapes={'input_images': [1, 320, 320, 3]}
-)
+if args.quantization is not None:
+    quantization = args.quantization
+else:
+    quantization = 'int8'  # @param ['dr', 'int8', 'float16']
 
-converter.optimizations = [tf.lite.Optimize.DEFAULT]
+time_since_last_creation = open(path_to_main_file + '.runtime_data', 'r').read()
+if time_since_last_creation == '':
+    time_since_last_creation = 0
+else:
+    time_since_last_creation = float(time_since_last_creation)
 
-if quantization == "float16":
-    converter.target_spec.supported_types = [tf.float16]
-elif quantization == "int8":
-    converter.representative_dataset = representative_dataset_gen
-    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-    converter.inference_input_type = tf.uint8
-    converter.inference_output_type = tf.uint8
+print(time.time() - time_since_last_creation)
+if time.time() - time_since_last_creation > 600 or args.dataset is not None:  # If it has been less than 10 minutes since the last time a model has been made.
+    converter = tf.compat.v1.lite.TFLiteConverter.from_frozen_graph(
+        graph_def_file=path_to_main_file + 'EAST-text-detection-OpenCV/frozen_east_text_detection.pb', # This has to have the folder specified based on the OS
+        input_arrays=['input_images'],
+        output_arrays=['feature_fusion/Conv_7/Sigmoid', 'feature_fusion/concat_3'],
+        input_shapes={'input_images': [1, 320, 320, 3]}
+    )
 
-tflite_model = converter.convert()
-open('east_model_{}.tflite'.format(quantization), 'wb').write(tflite_model)
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+    if quantization == "float16":
+        converter.target_spec.supported_types = [tf.float16]
+    elif quantization == "int8":
+        converter.representative_dataset = representative_dataset_gen
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        converter.inference_input_type = tf.uint8
+        converter.inference_output_type = tf.uint8
+
+
+    tflite_model = converter.convert()
+    open(path_to_main_file + 'east_model_{}.tflite'.format(quantization), 'wb').write(tflite_model)
+    open(path_to_main_file + '.runtime_data', 'w').write(str(time.time()))
 
 
 def preprocess_image(image_path):
@@ -85,8 +106,8 @@ def preprocess_image(image_path):
     return image, orig, rW, rH
 
 
-image_to_test = "yellow_submarine.png"
-image2, orig2, rW2, rH2 = preprocess_image(image_to_test)
+# image_to_test = "yellow_submarine.png"
+image2, orig2, rW2, rH2 = preprocess_image(image3)
 
 
 def perform_inference(tflite_path, preprocessed_image):
@@ -113,8 +134,8 @@ def perform_inference(tflite_path, preprocessed_image):
     return scores, geometry
 
 
-quantization2 = "int8" #@param ["dr", "int8", "float16"]
-scores2, geometry2 = perform_inference(tflite_path=f'east_model_{quantization}.tflite',
+# quantization2 = "int8" #@param ["dr", "int8", "float16"]
+scores2, geometry2 = perform_inference(tflite_path=f'{path_to_main_file}east_model_{quantization}.tflite',
                                      preprocessed_image=image2)
 
 scores2 = np.transpose(scores2, (0, 3, 1, 2))
@@ -195,12 +216,12 @@ def post_process(score, geo, ratioW, ratioH, original):
     cv2.imshow("original", original)
 
 
-original2 = cv2.imread('lena.png')
+original2 = cv2.imread(image3)
 post_process(scores2, geometry2, rW2, rH2, original2)
 
 cv2.waitKey(0)
 
-original2 = cv2.imread(image_to_test)
-post_process(scores2, geometry2, rW2, rH2, original2)
-
-cv2.waitKey(0)
+# original2 = cv2.imread(image_to_test)
+# post_process(scores2, geometry2, rW2, rH2, original2)
+#
+# cv2.waitKey(0)
