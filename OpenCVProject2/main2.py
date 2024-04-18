@@ -39,7 +39,7 @@ def representative_dataset_gen():
 
 quantization = 'int8'  # @param ['dr', 'int8', 'float16']
 converter = tf.compat.v1.lite.TFLiteConverter.from_frozen_graph(
-    graph_def_file='EAST-text-detection-OpenCV\\frozen_east_text_detection.pb', # This has to have the folder specified based on the OS
+    graph_def_file='EAST-text-detection-OpenCV/frozen_east_text_detection.pb', # This has to have the folder specified based on the OS
     input_arrays=['input_images'],
     output_arrays=['feature_fusion/Conv_7/Sigmoid', 'feature_fusion/concat_3'],
     input_shapes={'input_images': [1, 320, 320, 3]}
